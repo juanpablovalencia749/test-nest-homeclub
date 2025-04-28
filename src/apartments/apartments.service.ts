@@ -32,7 +32,7 @@ export class ApartmentsService {
   }
 
   async findAllNearbyApartments(query: GetApartmentsNearbyDto) {
-    const { lat, lng, type, minPrice, maxPrice, page = 1, limit = 10 } = query;
+    const { lat, lng, minPrice, maxPrice, type, page = 1, limit = 10 } = query;
     const parsedLat = parseFloat(lat);
     const parsedLng = parseFloat(lng);
     const pageNumber = parseInt(String(page), 10);
@@ -53,76 +53,33 @@ export class ApartmentsService {
       );
     }
 
-    const today = new Date().toISOString().split('T')[0];
     const where: string[] = ['A.status = "active"'];
-    const filters: string[] = [];
     const params: (string | number)[] = [];
-
-    let priceJoin = '';
-    let priceField = '';
-
-    if (type === 'corporate') {
-      priceJoin = `JOIN CorporateRate CR ON A.id = CR.apartment_id AND CR.start_date <= ? AND CR.end_date >= ?`;
-      priceField = 'CR.monthly_rate AS rate';
-      params.push(today, today);
-      if (minPrice) {
-        filters.push('CR.monthly_rate >= ?');
-        params.push(minPrice);
-      }
-      if (maxPrice) {
-        filters.push('CR.monthly_rate <= ?');
-        params.push(maxPrice);
-      }
-    } else if (type === 'tourist') {
-      priceJoin = `JOIN TouristRate TR ON A.id = TR.apartment_id AND TR.start_date <= ? AND TR.end_date >= ?`;
-      priceField = 'TR.daily_rate AS rate';
-      params.push(today, today);
-      if (minPrice) {
-        filters.push('TR.daily_rate >= ?');
-        params.push(minPrice);
-      }
-      if (maxPrice) {
-        filters.push('TR.daily_rate <= ?');
-        params.push(maxPrice);
-      }
-    } else {
-      priceJoin = `
-        LEFT JOIN CorporateRate CR ON A.id = CR.apartment_id AND CR.start_date <= ? AND CR.end_date >= ?
-        LEFT JOIN TouristRate TR ON A.id = TR.apartment_id AND TR.start_date <= ? AND TR.end_date >= ?
-      `;
-      priceField = `
-        CASE
-          WHEN A.apartment_type = 'corporate' THEN CR.monthly_rate
-          ELSE TR.daily_rate
-        END AS rate
-      `;
-      params.push(today, today, today, today);
-      if (minPrice && maxPrice) {
-        filters.push(`
-          (
-            (A.apartment_type = 'corporate' AND CR.monthly_rate BETWEEN ? AND ?)
-            OR
-            (A.apartment_type = 'tourist' AND TR.daily_rate BETWEEN ? AND ?)
-          )
-        `);
-        params.push(minPrice, maxPrice, minPrice, maxPrice);
-      }
-    }
 
     if (type) {
       where.push('A.apartment_type = ?');
       params.push(type);
     }
 
-    if (filters.length) {
-      where.push(filters.join(' AND '));
+    const rateTable = type === 'tourist' ? 'TouristRate' : 'CorporateRate';
+    const rateField = type === 'tourist' ? 'daily_rate' : 'monthly_rate';
+
+    if (minPrice) {
+      where.push(`CR.${rateField} >= ?`);
+      params.push(minPrice);
+    }
+
+    if (maxPrice) {
+      where.push(`CR.${rateField} <= ?`);
+      params.push(maxPrice);
     }
 
     const { sql: distanceSql, params: distanceParams } = getDistanceSqlField(
       parsedLat,
       parsedLng,
     );
-    params.unshift(...distanceParams);
+
+    const finalParams = [...distanceParams, ...params, limitNumber, offset];
 
     const sql = `
       SELECT
@@ -131,29 +88,27 @@ export class ApartmentsService {
         A.latitude,
         A.longitude,
         A.apartment_type,
-        ${priceField},
+        CR.${rateField} AS rate,
         AE.description,
         AE.image_url,
         ${distanceSql}
       FROM Apartment A
       LEFT JOIN property_metadata.ApartmentExtra AE ON A.id = AE.apartment_id
-      ${priceJoin}
+      LEFT JOIN ${rateTable} CR ON A.id = CR.apartment_id
       WHERE ${where.join(' AND ')}
       ORDER BY distance ASC
       LIMIT ? OFFSET ?
     `;
-    console.log('SQL:n', sql);
-
-    params.push(limitNumber, offset);
 
     try {
       const rows = await this.databaseService.queryDB<Apartment[]>(
         sql,
-        params,
+        finalParams,
         'db1',
       );
       return { data: rows };
-    } catch {
+    } catch (error) {
+      console.error(error);
       throw new HttpException(
         'Error al obtener apartamentos cercanos',
         HttpStatus.INTERNAL_SERVER_ERROR,
