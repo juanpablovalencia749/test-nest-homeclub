@@ -268,23 +268,23 @@ export class ApartmentsService {
       status,
     } = body;
 
-    // if (!apartment_type) {
-    //   throw new HttpException(
-    //     'El tipo de apartamento no puede ser undefined',
-    //     HttpStatus.BAD_REQUEST,
-    //   );
-    // }
+    if (!apartment_type) {
+      throw new HttpException(
+        'El tipo de apartamento no puede ser nulo',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     try {
       const [apartment]: Apartment[] = await this.databaseService.queryDB<
         Apartment[]
       >('SELECT apartment_type FROM Apartment WHERE id = ?', [id], 'db1');
 
-      // if (!apartment) {
-      //   throw new HttpException(
-      //     'Apartamento no encontrado',
-      //     HttpStatus.NOT_FOUND,
-      //   );
-      // }
+      if (!apartment) {
+        throw new HttpException(
+          'Apartamento no encontrado',
+          HttpStatus.NOT_FOUND,
+        );
+      }
       if (apartment_type) {
         const currentApartmentType = apartment.apartment_type;
 
@@ -364,6 +364,11 @@ export class ApartmentsService {
           'db1',
         );
       }
+      await this.databaseService.queryDB<ResultSetHeader>(
+        'DELETE FROM ApartmentExtra WHERE apartment_id = ?',
+        [id],
+        'db2',
+      );
 
       await this.databaseService.queryDB<ResultSetHeader>(
         'DELETE FROM Apartment WHERE id = ?',
