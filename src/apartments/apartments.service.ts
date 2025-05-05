@@ -61,8 +61,32 @@ export class ApartmentsService {
       params.push(type);
     }
 
-    const rateTable = type === 'tourist' ? 'TouristRate' : 'CorporateRate';
-    const rateField = type === 'tourist' ? 'daily_rate' : 'monthly_rate';
+    const { sql: distanceSql, params: distanceParams } = getDistanceSqlField(
+      parsedLat,
+      parsedLng,
+    );
+    let rateJoin = '';
+    let rateField = '';
+
+    switch (type) {
+      case 'tourist':
+        rateJoin = 'LEFT JOIN TouristRate CR ON A.id = CR.apartment_id';
+        rateField = 'daily_rate';
+        break;
+      case 'corporate':
+        rateJoin = 'LEFT JOIN CorporateRate CR ON A.id = CR.apartment_id';
+        rateField = 'monthly_rate';
+        break;
+      default:
+        rateJoin = `
+          LEFT JOIN (
+            SELECT apartment_id, daily_rate AS rate FROM TouristRate
+            UNION
+            SELECT apartment_id, monthly_rate AS rate FROM CorporateRate
+          ) CR ON A.id = CR.apartment_id
+        `;
+        rateField = 'rate';
+    }
 
     if (minPrice) {
       where.push(`CR.${rateField} >= ?`);
@@ -73,11 +97,6 @@ export class ApartmentsService {
       where.push(`CR.${rateField} <= ?`);
       params.push(maxPrice);
     }
-
-    const { sql: distanceSql, params: distanceParams } = getDistanceSqlField(
-      parsedLat,
-      parsedLng,
-    );
 
     const finalParams = [...distanceParams, ...params, limitNumber, offset];
 
@@ -94,7 +113,7 @@ export class ApartmentsService {
         ${distanceSql}
       FROM Apartment A
       LEFT JOIN property_metadata.ApartmentExtra AE ON A.id = AE.apartment_id
-      LEFT JOIN ${rateTable} CR ON A.id = CR.apartment_id
+      ${rateJoin}
       WHERE ${where.join(' AND ')}
       ORDER BY distance ASC
       LIMIT ? OFFSET ?
